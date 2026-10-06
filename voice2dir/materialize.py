@@ -45,9 +45,19 @@ def _check_value(name: str, value) -> None:
     )
 
 
+def validate(tree) -> None:
+    """Validate a tree against the json2dir scheme without touching disk."""
+    if not isinstance(tree, dict):
+        raise MaterializeError("корень дерева обязан быть объектом")
+    for name, value in tree.items():
+        _check_name(name)
+        _check_value(name, value)
+        if isinstance(value, dict):
+            validate(value)
+
+
 def _remove(path: Path) -> None:
     """json2dir semantics: delete whatever occupies the target first."""
-    if path.is_symlink() or path.is_file():
         path.unlink()
     elif path.is_dir():
         import shutil
