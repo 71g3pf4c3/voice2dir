@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "voice2dir"
+version = "0.1.0"
+description = "Narrate a directory tree, get it on disk: voice -> ASR -> DSL -> json2dir scheme"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "GPL-3.0-or-later" }
+keywords = ["json2dir", "whisper", "asr", "voice"]
+
+[project.scripts]
+voice2dir = "voice2dir.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["voice2dir*"]
