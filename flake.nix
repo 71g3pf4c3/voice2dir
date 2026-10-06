@@ -17,6 +17,8 @@
             pname = "voice2dir";
             version = "0.1.0";
             src = self;
+            pyproject = true;
+            build-system = [ python.setuptools ];
             # ASR and audio I/O are external tools resolved from PATH.
             nativeBuildInputs = [ pkgs.makeWrapper ];
             postInstall = ''

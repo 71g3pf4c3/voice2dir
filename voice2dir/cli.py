@@ -18,7 +18,7 @@ import sys
 from pathlib import Path
 
 from . import __version__
-from . import asr, dsl, materialize, record
+from . import asr, dsl, materialize, record, spoken_json
 
 EXIT_OK, EXIT_ERROR, EXIT_USAGE, EXIT_DRIFT = 0, 1, 2, 3
 
@@ -42,6 +42,11 @@ def build_parser() -> argparse.ArgumentParser:
         sp.add_argument("--no-verify", action="store_true",
                         help="не выполнять обратную проверку (read-back)")
 
+    def add_mode(sp):
+        sp.add_argument("--mode", choices=("dsl", "json"), default="dsl",
+                        help="формат наговорки: dsl (команды каталог/файл/...) или "
+                             "json (кавычка/фигурная скобка/двоеточие/...)")
+
     sp = sub.add_parser("audio", help="аудиофайл (.ogg/.mp3/.wav/...) -> дерево")
     sp.add_argument("audio", type=Path, help="входной аудиофайл")
     sp.add_argument("out", nargs="?", type=Path, default=Path("."),
@@ -49,6 +54,7 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--lang", default="ru", help="язык записи [ru]")
     sp.add_argument("--model", default=asr.DEFAULT_MODEL,
                     help=f"ggml-модель [по умолчанию: {asr.DEFAULT_MODEL}]")
+    add_mode(sp)
     add_common(sp)
 
     sp = sub.add_parser("record", help="запись с микрофона (Ctrl+C — стоп) -> дерево")
@@ -57,6 +63,7 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--lang", default="ru", help="язык записи [ru]")
     sp.add_argument("--model", default=asr.DEFAULT_MODEL,
                     help=f"ggml-модель [по умолчанию: {asr.DEFAULT_MODEL}]")
+    add_mode(sp)
     add_common(sp)
 
     sp = sub.add_parser("transcribe", help="аудиофайл -> транскрипт (без построения)")
@@ -64,11 +71,13 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--lang", default="ru", help="язык записи [ru]")
     sp.add_argument("--model", default=asr.DEFAULT_MODEL,
                     help=f"ggml-модель [по умолчанию: {asr.DEFAULT_MODEL}]")
+    add_mode(sp)
 
     sp = sub.add_parser("build", help="текстовый транскрипт -> дерево (без ASR)")
     sp.add_argument("transcript", type=Path, help="файл транскрипта (или - для stdin)")
     sp.add_argument("out", nargs="?", type=Path, default=Path("."),
                     help="целевой каталог [по умолчанию: .]")
+    add_mode(sp)
     add_common(sp)
 
     return p
@@ -94,6 +103,14 @@ def _emit_tree(tree: dict, out: Path, args) -> int:
 
 
 def _from_transcript(text: str, args) -> int:
+    mode = getattr(args, "mode", "dsl")
+    if mode == "json":
+        try:
+            tree = spoken_json.parse(text)
+        except spoken_json.SpokenJsonError as e:
+            print(f"voice2dir: транскрипт не разобран: {e}", file=sys.stderr)
+            return EXIT_ERROR
+        return _emit_tree(tree, args.out, args)
     try:
         tree = dsl.parse(text, lenient=getattr(args, "lenient", False))
     except dsl.DslError as e:
@@ -102,18 +119,27 @@ def _from_transcript(text: str, args) -> int:
     return _emit_tree(tree, args.out, args)
 
 
+def _echo_transcript(text: str, mode: str) -> None:
+    print("voice2dir: --- транскрипт ---", file=sys.stderr)
+    print(text.strip(), file=sys.stderr)
+    print("voice2dir: ---------------------", file=sys.stderr)
+    if mode == "json":
+        print("voice2dir: --- нормализованный JSON ---", file=sys.stderr)
+        print(spoken_json.normalize(text).strip(), file=sys.stderr)
+        print("voice2dir: ---------------------", file=sys.stderr)
+
+
 def cmd_audio(args) -> int:
     if not args.audio.is_file():
         print(f"voice2dir: файл не найден: {args.audio}", file=sys.stderr)
         return EXIT_ERROR
     try:
-        text = asr.transcribe_file(args.audio, lang=args.lang, model=args.model)
+        text = asr.transcribe_file(args.audio, lang=args.lang, model=args.model,
+                                   mode=args.mode)
     except (asr.AsrError, OSError) as e:
         print(f"voice2dir: {e}", file=sys.stderr)
         return EXIT_ERROR
-    print("voice2dir: --- транскрипт ---", file=sys.stderr)
-    print(text.strip(), file=sys.stderr)
-    print("voice2dir: ---------------------", file=sys.stderr)
+    _echo_transcript(text, args.mode)
     return _from_transcript(text, args)
 
 
@@ -121,13 +147,12 @@ def cmd_record(args) -> int:
     try:
         wav = Path.home() / ".cache" / "voice2dir" / "recording.wav"
         record.record_wav(wav)
-        text = asr.transcribe_file(wav, lang=args.lang, model=args.model)
+        text = asr.transcribe_file(wav, lang=args.lang, model=args.model,
+                                   mode=args.mode)
     except (asr.AsrError, OSError) as e:
         print(f"voice2dir: {e}", file=sys.stderr)
         return EXIT_ERROR
-    print("voice2dir: --- транскрипт ---", file=sys.stderr)
-    print(text.strip(), file=sys.stderr)
-    print("voice2dir: ---------------------", file=sys.stderr)
+    _echo_transcript(text, args.mode)
     return _from_transcript(text, args)
 
 
@@ -136,11 +161,16 @@ def cmd_transcribe(args) -> int:
         print(f"voice2dir: файл не найден: {args.audio}", file=sys.stderr)
         return EXIT_ERROR
     try:
-        text = asr.transcribe_file(args.audio, lang=args.lang, model=args.model)
+        text = asr.transcribe_file(args.audio, lang=args.lang, model=args.model,
+                                   mode=args.mode)
     except (asr.AsrError, OSError) as e:
         print(f"voice2dir: {e}", file=sys.stderr)
         return EXIT_ERROR
     print(text.strip())
+    if args.mode == "json":
+        print("voice2dir: --- нормализованный JSON ---", file=sys.stderr)
+        print(spoken_json.normalize(text).strip(), file=sys.stderr)
+        print("voice2dir: ---------------------", file=sys.stderr)
     return EXIT_OK
 
 

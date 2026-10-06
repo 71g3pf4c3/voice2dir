@@ -78,6 +78,26 @@ class CliBuildTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual((self.out / "а").read_text(encoding="utf-8"), "x\n")
 
+    def test_build_json_mode(self):
+        result = subprocess.run(
+            [sys.executable, "-m", "voice2dir.cli",
+             "build", "--mode", "json", "-", str(self.out)],
+            input=("фигурная скобка кавычка а кавычка двоеточие "
+                   "кавычка бэ кавычка закрывающая фигурная скобка"),
+            capture_output=True, text=True, cwd=REPO,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual((self.out / "а").read_text(encoding="utf-8"), "бэ")
+
+    def test_build_json_mode_error_exit_1(self):
+        result = subprocess.run(
+            [sys.executable, "-m", "voice2dir.cli",
+             "build", "--mode", "json", "-", str(self.out)],
+            input="фигурная скобка",
+            capture_output=True, text=True, cwd=REPO,
+        )
+        self.assertEqual(result.returncode, 1)
+
 
 if __name__ == "__main__":
     unittest.main()

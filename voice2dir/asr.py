@@ -102,10 +102,24 @@ def to_wav16k(audio: Path, out_dir: Path) -> Path:
 # "канец яйма" on a noisy channel.
 DSL_PROMPT = "каталог тест\nфайл а\nтекст\nконец файла\nконец каталога\nконец дерева\nвверх\nссылка а на б\nскрипт с\n"
 
+# Same trick for json-dictation mode: the spoken-punctuation vocabulary
+# ("кавычка", "фигурная скобка", "двоеточие", ...) is rare in everyday
+# speech, so without biasing whisper prefers homophones.
+JSON_PROMPT = (
+    "открывающая фигурная скобка\nзакрывающая фигурная скобка\n"
+    "квадратная скобка\nкавычка имя\nдвоеточие\nзапятая\n"
+    "ссылка\nскрипт\nперевод строки\n"
+)
+
+PROMPTS = {"dsl": DSL_PROMPT, "json": JSON_PROMPT}
+
 
 def transcribe_file(audio: Path, lang: str = "ru", model: str = DEFAULT_MODEL,
-                    workdir: Path | None = None) -> str:
-    """Audio file (ogg/mp3/wav/...) -> transcript text."""
+                    workdir: Path | None = None, mode: str = "dsl") -> str:
+    """Audio file (ogg/mp3/wav/...) -> transcript text.
+
+    mode selects the decoder bias prompt: "dsl" (command vocabulary) or
+    "json" (spoken-punctuation vocabulary)."""
     whisper = _require_tool("whisper-cli")
     model_path = ensure_model(model)
     work = workdir or audio.parent
@@ -114,7 +128,7 @@ def transcribe_file(audio: Path, lang: str = "ru", model: str = DEFAULT_MODEL,
     cmd = [
         whisper, "-m", str(model_path), "-f", str(wav),
         "-l", lang, "-otxt", "-of", str(out_prefix), "-np",
-        "--prompt", DSL_PROMPT, "-bs", "5",
+        "--prompt", PROMPTS.get(mode, DSL_PROMPT), "-bs", "5",
     ]
     proc = subprocess.run(cmd, capture_output=True, text=True)
     txt = Path(str(out_prefix) + ".txt")

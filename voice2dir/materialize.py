@@ -58,6 +58,7 @@ def validate(tree) -> None:
 
 def _remove(path: Path) -> None:
     """json2dir semantics: delete whatever occupies the target first."""
+    if path.is_symlink() or path.is_file():
         path.unlink()
     elif path.is_dir():
         import shutil

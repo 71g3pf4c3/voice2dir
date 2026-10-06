@@ -99,9 +99,6 @@ PHRASES: dict[tuple[str, ...], str] = {
 
 _MAX_PHRASE = 3
 
-# After these characters the next word attaches without a space.
-_NO_SPACE_AFTER = {'"', "\\"}
-
 
 class SpokenJsonError(Exception):
     pass
@@ -131,15 +128,19 @@ def normalize(transcript: str) -> str:
         out.append(ch)
 
     def add_word(word: str) -> None:
-        if out and out[-1] and out[-1][-1] not in (" ",) and (
-            out[-1][-1] in _NO_SPACE_AFTER
-            or (out[-1][-1] == "." and word[:1].isdigit())
+        if not out:
+            out.append(word)
+            return
+        last = out[-1][-1]
+        # Inside a string a word attaches directly to the opening quote;
+        # after a closing quote (structural position) it needs a space,
+        # otherwise json error positions become unreadable.
+        if (in_string and last == '"') or last == "\\" or (
+            last == "." and word[:1].isdigit()
         ):
             out.append(word)
-        elif out:
-            out.append(" ")
-            out.append(word)
         else:
+            out.append(" ")
             out.append(word)
 
     i = 0
@@ -156,7 +157,12 @@ def normalize(transcript: str) -> str:
         i += length
 
         if action == _QUOTE:
+            # "бэкслэш кавычка" is a literal quote inside a string:
+            # emit it, but keep the string state untouched.
+            escaped = bool(out) and out[-1] == "\\"
             add_punct('"')
+            if escaped:
+                continue
             in_string = not in_string
             if not in_string:
                 last_struct = '"'
@@ -221,5 +227,34 @@ def parse(transcript: str) -> dict:
         raise SpokenJsonError(
             f"корень обязан быть объектом, получено: {type(value).__name__}"
         )
-    materialize.validate(value)
+    value = _fixup_tags(value)
+    try:
+        materialize.validate(value)
+    except materialize.MaterializeError as e:
+        raise SpokenJsonError(str(e)) from e
+    return value
+
+
+# The scheme tags ["link", ...] / ["script", ...] are English, but they
+# are dictated as ordinary quoted words. Accept the Russian spelling in
+# tag position: ["ссылка", t] -> ["link", t]. A bare Russian word as a
+# file name is unaffected: only exact two-element arrays are rewritten,
+# and any such array is invalid in the scheme anyway.
+_CYRILLIC_TAGS = {
+    "ссылка": "link", "ссылки": "link", "ссылку": "link",
+    "скрипт": "script",
+}
+
+
+def _fixup_tags(value):
+    if isinstance(value, dict):
+        return {k: _fixup_tags(v) for k, v in value.items()}
+    if (
+        isinstance(value, list)
+        and len(value) == 2
+        and isinstance(value[0], str)
+        and isinstance(value[1], str)
+        and value[0].casefold() in _CYRILLIC_TAGS
+    ):
+        return [_CYRILLIC_TAGS[value[0].casefold()], value[1]]
     return value
